@@ -11,3 +11,16 @@
 *.lai
 *.la
 *.a
+
+# Compiled defaults
+a.out
+
+# Temp files
+#   Temp Vim
+.*.swp
+#   Temp Windows
+*.bak
+#   Temp Emacs
+*~
+[#]*[#]
+.\#*
