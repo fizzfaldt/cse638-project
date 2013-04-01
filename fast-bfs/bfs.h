@@ -42,14 +42,24 @@ class Graph {
         int serial_bfs(int s);
         int parallel_bfs(int s);
         int weight(int u, int name);
+
+        static void get_even_split_size_and_offset(int p, int i, int total, int *size, int *offset);
+
+        template<class T>
+        static void destructive_serial_prefix_sum(std::vector<T> &v);
+
+        template<class T>
+        static void destructive_parallel_prefix_sum(std::vector<T> &v);
     private:
-        void get_even_split_size_and_offset(int i, int total, int *size, int *offset) const;
         int find_max_d(void) const;
-        void destructive_serial_prefix_sum(std::vector<int> &v) const;
-        void destructive_parallel_prefix_sum(std::vector<int> &v) const;
-        int destructive_parallel_prefix_sum_up(std::vector<int> &v, int start, int limit) const;
-        void destructive_parallel_prefix_sum_down(std::vector<int> &v, int start, int limit, int partial_sum) const;
-        int find_index_in_prefix_sum(int value, std::vector<int> &v) const;
+
+        template<class T>
+        static T destructive_parallel_prefix_sum_up(std::vector<T> &v, size_t start, size_t limit);
+
+        template<class T>
+        static void destructive_parallel_prefix_sum_down(std::vector<T> &v, size_t start, size_t limit, T partial_sum);
+
+        static int find_index_in_prefix_sum(int value, std::vector<int> &v);
 };
 
 

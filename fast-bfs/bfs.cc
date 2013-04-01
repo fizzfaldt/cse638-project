@@ -35,6 +35,12 @@ Graph::Graph(bool opt_c) :
     p(ctx.get_worker_count()),
     opt_c(opt_c) {
     srandom(time(NULL));
+    vector<int> xx;
+    xx.resize(8, 0);
+    xx[0] = 17;
+    destructive_parallel_prefix_sum(xx);
+
+
 }
 
 void Graph::init(int n, int m, ifstream &ifs) {
@@ -110,7 +116,7 @@ int Graph::serial_bfs(int s) {
     return maxd;
 }
 
-void Graph::get_even_split_size_and_offset(int i, int total, int *size, int *offset) const {
+void Graph::get_even_split_size_and_offset(int p, int i, int total, int *size, int *offset) {
     if (i < total % p) {
         *size = (total + p - 1) / p;  //ceiling
     } else {
@@ -119,11 +125,12 @@ void Graph::get_even_split_size_and_offset(int i, int total, int *size, int *off
     *offset = i * (total / p) + min(i, total % p);
 }
 
-int Graph::find_index_in_prefix_sum(int value, vector<int> &v) const {
+int Graph::find_index_in_prefix_sum(int value, vector<int> &v) {
     int low = 0;
     int high = v.size() - 1;
-    assert(v.size() > 0);
+    assert(!v.empty());
     assert(v.back() >= value);
+    assert(value >= 0);
 
     while (high > low) {
         int mid = (high + low) / 2;
@@ -131,7 +138,7 @@ int Graph::find_index_in_prefix_sum(int value, vector<int> &v) const {
             // Search in upper half
             low = mid + 1;
             assert(low <= high);
-        } else if (v[mid] > value && mid > low && v[mid-1] >= value) {
+        } else if (v[mid] >= value && mid > low && v[mid-1] >= value) {
             // Search in lower half
             high = mid - 1;
         } else {
@@ -144,42 +151,50 @@ int Graph::find_index_in_prefix_sum(int value, vector<int> &v) const {
     return low;
 }
 
-void Graph::destructive_serial_prefix_sum(std::vector<int> &v) const {
-    int sum = 0;
-    for (int i = 0; i < (int)v.size(); i++) {
+template<class T>
+void Graph::destructive_serial_prefix_sum(std::vector<T> &v) {
+    T sum = 0;
+    for (size_t i = 0; i < v.size(); i++) {
         sum += v[i];
         v[i] = sum;
     }
 }
 
-int Graph::destructive_parallel_prefix_sum_up(std::vector<int> &v, int start, int limit) const {
-    const int size = limit - start;
-    assert(size > 0);
+template<class T>
+T Graph::destructive_parallel_prefix_sum_up(std::vector<T> &v, size_t start, size_t limit) {
+    assert(limit > start);
+    const size_t size = limit - start;
     if (size == 1) {
         return v[start];
     }
-    int x = cilk_spawn destructive_parallel_prefix_sum_up(v, start, (start+limit)/2);
-    int y = destructive_parallel_prefix_sum_up(v, (start+limit)/2, limit);
+    T x = cilk_spawn destructive_parallel_prefix_sum_up(v, start, (start+limit)/2);
+    T y = destructive_parallel_prefix_sum_up(v, (start+limit)/2, limit);
     cilk_sync;
-    return (v.back() = x+y);
+    return (v[limit-1] = x+y);
 }
 
-void Graph::destructive_parallel_prefix_sum_down(std::vector<int> &v, int start, int limit, int partial_sum) const {
-    const int size = limit - start;
-    assert(size > 0);
+template<class T>
+void Graph::destructive_parallel_prefix_sum_down(std::vector<T> &v, size_t start, size_t limit, T partial_sum) {
+    assert(limit > start);
+    const size_t size = limit - start;
     if (size == 1) {
         v[start] += partial_sum;
         return;
     }
-    int sum_left = v[(start+limit)/2 - 1];
+    T sum_left = v[(start+limit)/2 - 1];
     cilk_spawn destructive_parallel_prefix_sum_down(v, start, (start+limit)/2, partial_sum);
     destructive_parallel_prefix_sum_down(v, (start+limit)/2, limit, partial_sum + sum_left);
 }
 
-void Graph::destructive_parallel_prefix_sum(std::vector<int> &v) const {
-    if (v.size() > 0) {
+template<class T>
+void Graph::destructive_parallel_prefix_sum(std::vector<T> &v) {
+#if 1
+    //DISABLE PARALLEL ENTIRELY .  Algorithm needs to be fixed.
+    destructive_serial_prefix_sum(v); return;
+#endif
+    if (!v.empty()) {
         destructive_parallel_prefix_sum_up(v, 0, v.size());
-        destructive_parallel_prefix_sum_down(v, 0, v.size(), 0);
+        destructive_parallel_prefix_sum_down(v, 0, v.size(), static_cast<T>(0));
         // Optional:  cilk_sync can be moved to last line of destructive_parallel_prefix_sum_down
         cilk_sync;
     }
@@ -218,7 +233,7 @@ int Graph::parallel_bfs(int s) {
 
     while (num_input_vertexes > 0) {
         cilk_for (int i = 0; i < p; i++) {
-            get_even_split_size_and_offset(i, num_input_vertexes, &num_vertexes[i], &offset_vertexes[i]);
+            get_even_split_size_and_offset(p, i, num_input_vertexes, &num_vertexes[i], &offset_vertexes[i]);
 
             // Generate prefix sum for out-degrees in core i's portion of input_vertexes
             prefix_sum_degrees[i].clear();
@@ -229,42 +244,47 @@ int Graph::parallel_bfs(int s) {
             }
             destructive_serial_prefix_sum(prefix_sum_degrees[i]);
             assert((int)prefix_sum_degrees[i].size() == num_vertexes[i]);
-            prefix_sum_degrees_per_core[i] = prefix_sum_degrees[i].back();
+            prefix_sum_degrees_per_core[i] = prefix_sum_degrees[i].empty() ? 0 : prefix_sum_degrees[i].back();
         }
         destructive_parallel_prefix_sum(prefix_sum_degrees_per_core);
         int total_degrees = prefix_sum_degrees_per_core.back();
         cilk_for (int i = 0; i < p; i++) {
-            get_even_split_size_and_offset(i, total_degrees, &num_degrees[i], &offset_degrees[i]);
+            get_even_split_size_and_offset(p, i, total_degrees, &num_degrees[i], &offset_degrees[i]);
 
-            const int sublist = find_index_in_prefix_sum(offset_degrees[i], prefix_sum_degrees_per_core);
-            const int degrees_in_earlier_lists = (i==0) ? 0 : prefix_sum_degrees_per_core[i-1];
-            const int vertex_in_sublist = find_index_in_prefix_sum(offset_degrees[i] - degrees_in_earlier_lists, prefix_sum_degrees[sublist]);
-            const int degrees_in_earlier_vertexes = (vertex_in_sublist==0) ? 0 : prefix_sum_degrees[sublist][vertex_in_sublist-1];
-
-            const int starting_degree = offset_degrees[i] - degrees_in_earlier_lists - degrees_in_earlier_vertexes;
-            assert(starting_degree >= 0);
-            const int starting_vertex = vertex_in_sublist + offset_vertexes[i];
-
-            int remaining = num_degrees[i];
-            int vertex = starting_vertex;
-            int degree = starting_degree;
             q[i].clear();
-            while (remaining > 0) {
-                int u = input_vertexes[vertex];
-                int limit = min(remaining + degree, (int)adj[u].size());
-                for (int j = degree; j < limit; j++) {
-                    int v = adj[u][j];
-                    if (d[v] == INFINITY) {
-                        owner[v] = i;  // Dedup/duplicate expansion optimization
-                        d[v] = d[u] + 1;
-                        q[i].push_back(v);
+            if (num_degrees[i] > 0) {
+                const int sublist = find_index_in_prefix_sum(offset_degrees[i]+1, prefix_sum_degrees_per_core);
+                const int degrees_in_earlier_lists = (sublist==0) ? 0 : prefix_sum_degrees_per_core[sublist-1];
+                const int vertex_in_sublist = find_index_in_prefix_sum(offset_degrees[i]+1 - degrees_in_earlier_lists, prefix_sum_degrees[sublist]);
+                const int degrees_in_earlier_vertexes = (vertex_in_sublist==0) ? 0 : prefix_sum_degrees[sublist][vertex_in_sublist-1];
+
+                const int starting_degree = offset_degrees[i] - degrees_in_earlier_lists - degrees_in_earlier_vertexes;
+                assert(starting_degree >= 0);
+                const int vertexes_in_earlier_sublists = offset_vertexes[sublist];
+                const int starting_vertex = vertex_in_sublist + vertexes_in_earlier_sublists;
+                assert(starting_degree < (int)adj[input_vertexes[starting_vertex]].size());
+
+                int remaining = num_degrees[i];
+                int vertex = starting_vertex;
+                int degree = starting_degree;
+                while (remaining > 0) {
+                    int u = input_vertexes[vertex];
+                    int limit = min(remaining + degree, (int)adj[u].size());
+                    assert(limit > degree);
+                    for (int j = degree; j < limit; j++) {
+                        int v = adj[u][j];
+                        if (d[v] == INFINITY) {
+                            owner[v] = i;  // Dedup/duplicate expansion optimization
+                            d[v] = d[u] + 1;
+                            q[i].push_back(v);
+                        }
                     }
+                    remaining -= limit - degree;
+                    degree = 0;
+                    vertex++;
                 }
-                remaining -= limit - degree;
-                degree = 0;
-                vertex++;
+                assert(remaining == 0);
             }
-            assert(remaining == 0);
         }
         // Delete duplicate items from queues.
         cilk_for (int i = 0; i < p; i++) {
@@ -348,8 +368,56 @@ void Problem::run(bool parallel) {
     }
 }
 
+// Verifies this splits everything evenly and properly.
+static void test_get_even_split_size_and_offset(void) {
+    const int maxp = 10;
+    int size[maxp];
+    int offset[maxp];
+    for (int p = 1; p < maxp; p++) {
+        for (int total = 0; total < 100; total++) {
+            for (int i = 0; i < p; i++) {
+                Graph::get_even_split_size_and_offset(p, i, total, &size[i], &offset[i]);
+            }
+            int size_first = size[0];
+            int last_offset = offset[0];
+            assert(size_first >= 0);
+            assert(last_offset == 0);
+
+            int last_size = size_first;
+            int count = size_first;
+            for (int i = 1; i < p; i++) {
+                assert(size[i] >= 0);
+                count += size[i];
+                assert(last_size == size[i] || last_size - 1 == size[i]);
+                last_size = size[i];
+                assert(offset[i] == last_offset + size[i-1]);
+                last_offset = offset[i];
+            }
+            assert(count == total);
+        }
+    }
+}
+
+// Verifies prefix sum works in serial and parallel
+static void test_prefix_sum(void) {
+    vector<uint64_t> v_p(64);
+    vector<uint64_t> v_s(64);
+    for (int size = 0; size < 62; size++) {
+        for (int i = 0; i < size; i++) {
+            v_p[i] = v_s[i] = 1ULL<<i;
+        }
+        Graph::destructive_parallel_prefix_sum(v_p);
+        Graph::destructive_serial_prefix_sum(v_s);
+        for (int i = 0; i < size; i++) {
+            assert(v_s[i] == (1ULL<<(i+1))-1);
+            assert(v_p[i] == (1ULL<<(i+1))-1);
+        }
+
+    }
+}
+
 int cilk_main(int argc, char *argv[]) {
-    assert(argc == 4);
+    assert(argc == 5);
     struct timespec start_t;
     struct timespec end_t;
     int error;
@@ -359,7 +427,15 @@ int cilk_main(int argc, char *argv[]) {
     string file_name(argv[1]);
     bool opt_c = atoi(argv[2]);
     bool do_parallel = atoi(argv[3]);
+    bool do_test = atoi(argv[4]);
 
+    if (do_test) {
+        fprintf(stderr, "TESTING INSTEAD!!\n");
+        fflush(stderr);
+        test_get_even_split_size_and_offset();
+        test_prefix_sum();
+        exit(0);
+    }
     if (!opt_c) {
         fprintf(stderr, "Disabling option c (dedup) is not yet supported\n");
         exit(1);

@@ -14,7 +14,7 @@ inline int __cilkrts_get_nworkers(void) {
 namespace cilk {
     class context {
         public:
-            int get_worker_count() { return 1; }
+            int get_worker_count() { return 8; }
     };
     template<class T>
     class reducer_opand {
