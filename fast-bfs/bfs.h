@@ -18,6 +18,7 @@
 // cilk arts
 #define _Cilk_for cilk_for
 #define _Cilk_sync cilk_sync
+#define _Cilk_spawn cilk_spawn
 #elif defined(__cilk)
 // cilkplus
 #define cilk_main main
