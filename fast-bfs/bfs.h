@@ -14,13 +14,13 @@
 #define PARANOID 0
 #define QUIT_EARLY 0
 
-#if defined(__cilk)
-// cilkplus
-#define cilk_main main
-#elif defined(__cilkplusplus)
+#if defined(__cilkplusplus)
 // cilk arts
 #define _Cilk_for cilk_for
 #define _Cilk_sync cilk_sync
+#elif defined(__cilk)
+// cilkplus
+#define cilk_main main
 #else
 #include "fakecilk.h"
 #endif

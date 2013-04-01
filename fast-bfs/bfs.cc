@@ -31,12 +31,12 @@
 
 using namespace std;
 static int get_num_workers() {
-#if defined(__cilk)
-    return __cilkrts_get_nworkers();
-// cilkplus
-#else
+#if defined(__cilkplusplus) || !defined(__cilk)
+// cilk arts
     static cilk::context ctx;
     return ctx.get_worker_count();
+#else
+    return __cilkrts_get_nworkers();
 #endif
 }
 
