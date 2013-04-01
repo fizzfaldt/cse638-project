@@ -2,6 +2,8 @@ CXX=cilk++
 DEBUG=0
 ifeq ($(DEBUG),1)
     OPTIMIZE=-O0
+else ifeq ($(CXX),icpc)
+    OPTIMIZE=-O3
 else
     OPTIMIZE=-O5
 endif
