@@ -297,7 +297,9 @@ int Graph::parallel_bfs(int s) {
                         if (d[v] == INFINITY) {
                             owner[v] = i;  // Dedup/duplicate expansion optimization
                             d[v] = d[u] + 1;
-                            q[i].push_back(v);
+                            if (!adj[v].empty()) {
+                                q[i].push_back(v);
+                            }
                         }
                     }
                     remaining -= limit - degree;
