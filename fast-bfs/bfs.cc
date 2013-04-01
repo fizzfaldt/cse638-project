@@ -122,7 +122,7 @@ void Graph::get_even_split_size_and_offset(int i, int total, int *size, int *off
 int Graph::find_index_in_prefix_sum(int value, vector<int> &v) const {
     int low = 0;
     int high = v.size() - 1;
-    assert(high > low);
+    assert(v.size() > 0);
     assert(v.back() >= value);
 
     while (high > low) {
@@ -160,6 +160,7 @@ int Graph::destructive_parallel_prefix_sum_up(std::vector<int> &v, int start, in
     }
     int x = cilk_spawn destructive_parallel_prefix_sum_up(v, start, (start+limit)/2);
     int y = destructive_parallel_prefix_sum_up(v, (start+limit)/2, limit);
+    cilk_sync;
     return (v.back() = x+y);
 }
 
@@ -339,6 +340,7 @@ void Problem::run(bool parallel) {
             maxd = g.serial_bfs(sources[s]);
         }
         printf("%d %llu\n", maxd, g.computeChecksum());
+        fflush(stdout);
 #if QUIT_EARLY 
         fprintf(stderr, "QUITTING\n");
         break;
@@ -347,7 +349,7 @@ void Problem::run(bool parallel) {
 }
 
 int cilk_main(int argc, char *argv[]) {
-    assert(argc == 6);
+    assert(argc == 4);
     struct timespec start_t;
     struct timespec end_t;
     int error;
@@ -356,7 +358,7 @@ int cilk_main(int argc, char *argv[]) {
 
     string file_name(argv[1]);
     bool opt_c = atoi(argv[2]);
-    bool do_parallel = atoi(argv[5]);
+    bool do_parallel = atoi(argv[3]);
 
     if (!opt_c) {
         fprintf(stderr, "Disabling option c (dedup) is not yet supported\n");
