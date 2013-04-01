@@ -161,8 +161,9 @@ T Graph::destructive_parallel_prefix_sum_up(std::vector<T> &v, size_t start, siz
     if (size == 1) {
         return v[start];
     }
-    T x = cilk_spawn destructive_parallel_prefix_sum_up(v, start, (start+limit)/2);
-    T y = destructive_parallel_prefix_sum_up(v, (start+limit)/2, limit);
+    T x, y;
+    x = cilk_spawn destructive_parallel_prefix_sum_up(v, start, (start+limit)/2);
+    y = destructive_parallel_prefix_sum_up(v, (start+limit)/2, limit);
     cilk_sync;
     return (v[limit-1] = x+y);
 }
