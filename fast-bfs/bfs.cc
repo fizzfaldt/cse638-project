@@ -35,12 +35,6 @@ Graph::Graph(bool opt_c) :
     p(ctx.get_worker_count()),
     opt_c(opt_c) {
     srandom(time(NULL));
-    vector<int> xx;
-    xx.resize(8, 0);
-    xx[0] = 17;
-    destructive_parallel_prefix_sum(xx);
-
-
 }
 
 void Graph::init(int n, int m, ifstream &ifs) {
