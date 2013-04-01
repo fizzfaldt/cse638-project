@@ -169,7 +169,7 @@ T Graph::destructive_parallel_prefix_sum_up(std::vector<T> &v, size_t start, siz
 }
 
 template<class T>
-void Graph::destructive_parallel_prefix_sum_down(std::vector<T> &v, size_t start, size_t limit, T partial_sum) {
+void Graph::destructive_parallel_prefix_sum_down(std::vector<T> &v, size_t start, size_t limit, bool rightmost_excluded, T partial_sum) {
     assert(limit > start);
     const size_t size = limit - start;
     if (size == 1) {
@@ -177,19 +177,33 @@ void Graph::destructive_parallel_prefix_sum_down(std::vector<T> &v, size_t start
         return;
     }
     T sum_left = v[(start+limit)/2 - 1];
-    cilk_spawn destructive_parallel_prefix_sum_down(v, start, (start+limit)/2, partial_sum);
-    destructive_parallel_prefix_sum_down(v, (start+limit)/2, limit, partial_sum + sum_left);
+    size_t mid = (start+limit)/2;
+    // Do entire left side.
+    cilk_spawn destructive_parallel_prefix_sum_down(v, start, mid, false, partial_sum);
+    // Rightmost element just takes partial_sum and is then excluded.
+    if (!rightmost_excluded) {
+        v[limit-1] += partial_sum;
+    }
+    assert(limit > mid);
+    // Do right half (excluding last element)
+    if (limit - mid > 1) {
+        destructive_parallel_prefix_sum_down(v, mid, limit, true, partial_sum + sum_left);
+    }
+}
+
+__attribute__((__used__))
+static void printv(vector<uint64_t> v, char *name) {
+    printf("V_%s=\n", name);
+    for (size_t i = 0; i < v.size(); i++) {
+        printf("\t[%lu] = [%lu]\n", i, v[i]);
+    }
 }
 
 template<class T>
 void Graph::destructive_parallel_prefix_sum(std::vector<T> &v) {
-#if 1
-    //DISABLE PARALLEL ENTIRELY .  Algorithm needs to be fixed.
-    destructive_serial_prefix_sum(v); return;
-#endif
     if (!v.empty()) {
         destructive_parallel_prefix_sum_up(v, 0, v.size());
-        destructive_parallel_prefix_sum_down(v, 0, v.size(), static_cast<T>(0));
+        destructive_parallel_prefix_sum_down(v, 0, v.size(), false, static_cast<T>(0));
         // Optional:  cilk_sync can be moved to last line of destructive_parallel_prefix_sum_down
         cilk_sync;
     }
@@ -395,17 +409,25 @@ static void test_get_even_split_size_and_offset(void) {
 
 // Verifies prefix sum works in serial and parallel
 static void test_prefix_sum(void) {
+    vector<uint64_t> sum(64);
+    sum.resize(64, 0);
+    sum[0] = 1;
+    for (size_t i = 1; i < sum.size(); i++) {
+        sum.at(i) = (sum.at(i-1) << 1) | 1;
+    }
     vector<uint64_t> v_p(64);
     vector<uint64_t> v_s(64);
-    for (int size = 0; size < 62; size++) {
+    for (int size = 0; size < 64; size++) {
+        v_p.resize(size, 0);
+        v_s.resize(size, 0);
         for (int i = 0; i < size; i++) {
-            v_p[i] = v_s[i] = 1ULL<<i;
+            v_p.at(i) = v_s.at(i) = 1ULL<<i;
         }
         Graph::destructive_parallel_prefix_sum(v_p);
         Graph::destructive_serial_prefix_sum(v_s);
         for (int i = 0; i < size; i++) {
-            assert(v_s[i] == (1ULL<<(i+1))-1);
-            assert(v_p[i] == (1ULL<<(i+1))-1);
+            assert(v_s.at(i) == sum.at(i));
+            assert(v_p.at(i) == sum.at(i));
         }
 
     }

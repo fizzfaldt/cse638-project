@@ -57,7 +57,7 @@ class Graph {
         static T destructive_parallel_prefix_sum_up(std::vector<T> &v, size_t start, size_t limit);
 
         template<class T>
-        static void destructive_parallel_prefix_sum_down(std::vector<T> &v, size_t start, size_t limit, T partial_sum);
+        static void destructive_parallel_prefix_sum_down(std::vector<T> &v, size_t start, size_t limit, bool rightmost_excluded, T partial_sum);
 
         static int find_index_in_prefix_sum(int value, std::vector<int> &v);
 };
