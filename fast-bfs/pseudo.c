@@ -42,7 +42,7 @@ parallel_bfs(G,s,d) {
             sublist = binary_search_index(startindex, S);
             vertex = binary_search_index(startindex - S[sublist-1], D[sublist]); // Treat S[-1] as 0
             degree = startindex - S[sublist-1] - D[sublist][vertex-1]; // Treat S[-1] and D[sublist][-1] as 0
-            vertex += S[sublist-1]; //now an index into I[]
+            vertex += S[sublist-1]; //now an index into I[] //TODO: <_ this is blatantly wrong!! wrong array?
 
             Q[i] = new Queue
             {
