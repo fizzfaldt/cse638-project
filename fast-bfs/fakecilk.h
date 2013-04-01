@@ -1,8 +1,8 @@
 #pragma once
 
-#define cilk_spawn
-#define cilk_sync
-#define cilk_for for
+#define _Cilk_spawn
+#define _Cilk_sync
+#define _Cilk_for for
 #define cilk_main main
 
 //#define DISABLE_CILK

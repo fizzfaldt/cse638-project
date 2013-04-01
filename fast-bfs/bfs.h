@@ -14,7 +14,14 @@
 #define PARANOID 0
 #define QUIT_EARLY 0
 
-#ifndef __cilkplusplus
+#if defined(__cilk)
+// cilkplus
+#define cilk_main main
+#elif defined(__cilkplusplus)
+// cilk arts
+#define _Cilk_for cilk_for
+#define _Cilk_sync cilk_sync
+#else
 #include "fakecilk.h"
 #endif
 
@@ -43,7 +50,7 @@ class Graph {
         int parallel_bfs(int s);
         int weight(int u, int name);
 
-        static void get_even_split_size_and_offset(int p, int i, int total, int *size, int *offset);
+        static void get_even_split_size_and_offset(int p, int i, int total, int &size, int &offset);
 
         template<class T>
         static void destructive_serial_prefix_sum(std::vector<T> &v);

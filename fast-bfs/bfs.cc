@@ -13,18 +13,32 @@
 #include <time.h>
 #include <errno.h>
 
-#ifdef __cilkplusplus
+#if defined(__cilkplusplus)
 #include <cilk.h>
 #include <reducer_opadd.h>
 #include <reducer_opand.h>
 #include <reducer_max.h>
-//#include <cilk_mutex.h>
+#elif defined(__cilk)
+#include <cilk/cilk_api.h>
+#include <cilk/reducer_opadd.h>
+#include <cilk/reducer_opand.h>
+#include <cilk/reducer_max.h>
 #endif
+
+//#include <cilk_mutex.h>
 
 #include "bfs.h"
 
 using namespace std;
-cilk::context ctx;
+static int get_num_workers() {
+#if defined(__cilk)
+    return __cilkrts_get_nworkers();
+// cilkplus
+#else
+    static cilk::context ctx;
+    return ctx.get_worker_count();
+#endif
+}
 
 Graph::Graph(bool opt_c) :
     n(0),
@@ -32,7 +46,7 @@ Graph::Graph(bool opt_c) :
     adj(),
     d(),
     owner(),
-    p(ctx.get_worker_count()),
+    p(get_num_workers()),
     opt_c(opt_c) {
     srandom(time(NULL));
 }
@@ -61,7 +75,7 @@ void Graph::init(int n, int m, ifstream &ifs) {
 unsigned long long Graph::computeChecksum(void) {
     cilk::reducer_opadd<unsigned long long> chksum;
 
-    cilk_for (int i = 0; i < n; ++i) {
+    _Cilk_for (int i = 0; i < n; ++i) {
         chksum += d[i] == INFINITY ? n : d[i];
     }
 #if CILK_VERIFY 
@@ -110,13 +124,13 @@ int Graph::serial_bfs(int s) {
     return maxd;
 }
 
-void Graph::get_even_split_size_and_offset(int p, int i, int total, int *size, int *offset) {
+void Graph::get_even_split_size_and_offset(int p, int i, int total, int &size, int &offset) {
     if (i < total % p) {
-        *size = (total + p - 1) / p;  //ceiling
+        size = (total + p - 1) / p;  //ceiling
     } else {
-        *size = total / p;  // floor
+        size = total / p;  // floor
     }
-    *offset = i * (total / p) + min(i, total % p);
+    offset = i * (total / p) + min(i, total % p);
 }
 
 int Graph::find_index_in_prefix_sum(int value, vector<int> &v) {
@@ -162,9 +176,9 @@ T Graph::destructive_parallel_prefix_sum_up(std::vector<T> &v, size_t start, siz
         return v[start];
     }
     T x, y;
-    x = cilk_spawn destructive_parallel_prefix_sum_up(v, start, (start+limit)/2);
+    x = _Cilk_spawn destructive_parallel_prefix_sum_up(v, start, (start+limit)/2);
     y = destructive_parallel_prefix_sum_up(v, (start+limit)/2, limit);
-    cilk_sync;
+    _Cilk_sync;
     return (v[limit-1] = x+y);
 }
 
@@ -179,7 +193,7 @@ void Graph::destructive_parallel_prefix_sum_down(std::vector<T> &v, size_t start
     T sum_left = v[(start+limit)/2 - 1];
     size_t mid = (start+limit)/2;
     // Do entire left side.
-    cilk_spawn destructive_parallel_prefix_sum_down(v, start, mid, false, partial_sum);
+    _Cilk_spawn destructive_parallel_prefix_sum_down(v, start, mid, false, partial_sum);
     // Rightmost element just takes partial_sum and is then excluded.
     if (!rightmost_excluded) {
         v[limit-1] += partial_sum;
@@ -204,13 +218,13 @@ void Graph::destructive_parallel_prefix_sum(std::vector<T> &v) {
     if (!v.empty()) {
         destructive_parallel_prefix_sum_up(v, 0, v.size());
         destructive_parallel_prefix_sum_down(v, 0, v.size(), false, static_cast<T>(0));
-        // Optional:  cilk_sync can be moved to last line of destructive_parallel_prefix_sum_down
-        cilk_sync;
+        // Optional:  _Cilk_sync can be moved to last line of destructive_parallel_prefix_sum_down
+        _Cilk_sync;
     }
 }
 
 int Graph::parallel_bfs(int s) {
-    cilk_for(int u = 0; u < n; ++u) {
+    _Cilk_for(int u = 0; u < n; ++u) {
         d[u] = INFINITY;
         if (opt_c) {
             owner[u] = INVALID;
@@ -224,25 +238,24 @@ int Graph::parallel_bfs(int s) {
     if (opt_c) {
         owner[s] = 0;
     }
-    int input_vertexes[n];
+    vector<int> input_vertexes(n);
     input_vertexes[0] = s;
     int num_input_vertexes = 1;;
 
-    vector<int> prefix_sum_degrees[p];
+    vector< vector<int> > prefix_sum_degrees(p);
     vector<int> prefix_sum_degrees_per_core;
-    prefix_sum_degrees_per_core.resize(p, 0);
+    prefix_sum_degrees_per_core.resize(p);
 
-    int num_degrees[p];
-    int offset_degrees[p];
-    int num_vertexes[p];
-    int offset_vertexes[p];
-    vector<int> queue_size;
-    queue_size.resize(p, 0);
+    vector<int> num_degrees(p);
+    vector<int> offset_degrees(p);
+    vector<int> num_vertexes(p);
+    vector<int> offset_vertexes(p);
+    vector<int> queue_size(p);
     q.resize(p);
 
     while (num_input_vertexes > 0) {
-        cilk_for (int i = 0; i < p; i++) {
-            get_even_split_size_and_offset(p, i, num_input_vertexes, &num_vertexes[i], &offset_vertexes[i]);
+        _Cilk_for (int i = 0; i < p; i++) {
+            get_even_split_size_and_offset(p, i, num_input_vertexes, num_vertexes[i], offset_vertexes[i]);
 
             // Generate prefix sum for out-degrees in core i's portion of input_vertexes
             prefix_sum_degrees[i].clear();
@@ -257,8 +270,8 @@ int Graph::parallel_bfs(int s) {
         }
         destructive_parallel_prefix_sum(prefix_sum_degrees_per_core);
         int total_degrees = prefix_sum_degrees_per_core.back();
-        cilk_for (int i = 0; i < p; i++) {
-            get_even_split_size_and_offset(p, i, total_degrees, &num_degrees[i], &offset_degrees[i]);
+        _Cilk_for (int i = 0; i < p; i++) {
+            get_even_split_size_and_offset(p, i, total_degrees, num_degrees[i], offset_degrees[i]);
 
             q[i].clear();
             if (num_degrees[i] > 0) {
@@ -296,7 +309,7 @@ int Graph::parallel_bfs(int s) {
             }
         }
         // Delete duplicate items from queues.
-        cilk_for (int i = 0; i < p; i++) {
+        _Cilk_for (int i = 0; i < p; i++) {
             //TODO: This can be balanced better by doing searches (including 'next queue' searches)
             int valid = 0;
             for (int index = 0; index < (int)q[i].size(); index++) {
@@ -308,13 +321,13 @@ int Graph::parallel_bfs(int s) {
             q[i].resize(valid);
 
             //TODO: If we disable (possibly by option) dedupping, we still need the next line.
-            //It can be moved up to prev cilk_for if no dedupping is done.
+            //It can be moved up to prev _Cilk_for if no dedupping is done.
             queue_size[i] = q[i].size();
         }
         destructive_parallel_prefix_sum(queue_size);
         num_input_vertexes = queue_size.back();
         assert(num_input_vertexes <= n);
-        cilk_for (int i = 0; i < p; i++) {
+        _Cilk_for (int i = 0; i < p; i++) {
             const int offset = (i==0) ? 0 : queue_size[i-1];
             for (int j = 0; j < (int)q[i].size(); j++) {
                 input_vertexes[offset+j] = q[i][j];
@@ -323,7 +336,7 @@ int Graph::parallel_bfs(int s) {
     }
 
     cilk::reducer_max<int> maxd(0);
-    cilk_for (int u = 0; u < n; ++u) {
+    _Cilk_for (int u = 0; u < n; ++u) {
     	if(d[u] == INFINITY) continue;
         maxd = cilk::max_of(maxd, d[u]);
     }
@@ -385,7 +398,7 @@ static void test_get_even_split_size_and_offset(void) {
     for (int p = 1; p < maxp; p++) {
         for (int total = 0; total < 100; total++) {
             for (int i = 0; i < p; i++) {
-                Graph::get_even_split_size_and_offset(p, i, total, &size[i], &offset[i]);
+                Graph::get_even_split_size_and_offset(p, i, total, size[i], offset[i]);
             }
             int size_first = size[0];
             int last_offset = offset[0];
