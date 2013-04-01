@@ -203,6 +203,7 @@ void Graph::destructive_parallel_prefix_sum_down(std::vector<T> &v, size_t start
     if (limit - mid > 1) {
         destructive_parallel_prefix_sum_down(v, mid, limit, true, partial_sum + sum_left);
     }
+    _Cilk_sync;
 }
 
 __attribute__((__used__))
@@ -218,8 +219,6 @@ void Graph::destructive_parallel_prefix_sum(std::vector<T> &v) {
     if (!v.empty()) {
         destructive_parallel_prefix_sum_up(v, 0, v.size());
         destructive_parallel_prefix_sum_down(v, 0, v.size(), false, static_cast<T>(0));
-        // Optional:  _Cilk_sync can be moved to last line of destructive_parallel_prefix_sum_down
-        _Cilk_sync;
     }
 }
 
