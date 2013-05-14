@@ -28,6 +28,7 @@
 //#include <cilk_mutex.h>
 
 #include "bfs.h"
+#define DEBUG_ARRAY 0
 
 using namespace std;
 static int get_num_workers() {
@@ -123,7 +124,18 @@ int Graph::serial_bfs(int s) {
     }
     return maxd;
 }
-
+int Graph::get_slot_number(int p, int total, int degree){
+	//each of the first early_slots will have total/p + 1 elements, total elements in these slots is early_elements
+	//if degree > early_elements first early_elements will fit in early_slots each of size total/p +1
+	//the remaining_elements will fit in slots of size total/p
+	if(p >= total) return degree-1;
+	int early_slots = total % p;
+	int early_elements = early_slots * ((total / p) + 1);
+	int remaining_elements = degree - early_elements;
+	if(degree <= early_elements)
+		return (degree -1)/((total / p)+1);
+	return early_slots + (remaining_elements - 1)/(total /p);
+}
 void Graph::get_even_split_size_and_offset(int p, int i, int total, int &size, int &offset) {
     if (i < total % p) {
         size = (total + p - 1) / p;  //ceiling
@@ -210,7 +222,7 @@ __attribute__((__used__))
 static void printv(vector<uint64_t> v, char *name) {
     printf("V_%s=\n", name);
     for (size_t i = 0; i < v.size(); i++) {
-        printf("\t[%lu] = [%lu]\n", i, v[i]);
+        printf("\t[%d] = [%lld]\n", (int)i, v[i]);
     }
 }
 
@@ -240,6 +252,8 @@ int Graph::parallel_bfs(int s) {
     vector<int> input_vertexes(n);
     input_vertexes[0] = s;
     int num_input_vertexes = 1;;
+	int current_p = p;
+	//int current_p = min(p, num_input_vertexes);
 
     vector< vector<int> > prefix_sum_degrees(p);
     vector<int> prefix_sum_degrees_per_core;
@@ -251,10 +265,16 @@ int Graph::parallel_bfs(int s) {
     vector<int> offset_vertexes(p);
     vector<int> queue_size(p);
     q.resize(p);
-
     while (num_input_vertexes > 0) {
-        _Cilk_for (int i = 0; i < p; i++) {
-            get_even_split_size_and_offset(p, i, num_input_vertexes, num_vertexes[i], offset_vertexes[i]);
+		int new_p = min(p, num_input_vertexes);
+		if(current_p != new_p){
+			current_p = min(p, num_input_vertexes);
+			prefix_sum_degrees_per_core.resize(current_p);
+			queue_size.resize(current_p);
+		}
+		//current_p = p;
+        _Cilk_for (int i = 0; i < current_p; i++) {
+            get_even_split_size_and_offset(current_p, i, num_input_vertexes, num_vertexes[i], offset_vertexes[i]);
 
             // Generate prefix sum for out-degrees in core i's portion of input_vertexes
             prefix_sum_degrees[i].clear();
@@ -269,12 +289,55 @@ int Graph::parallel_bfs(int s) {
         }
         destructive_parallel_prefix_sum(prefix_sum_degrees_per_core);
         int total_degrees = prefix_sum_degrees_per_core.back();
-        _Cilk_for (int i = 0; i < p; i++) {
-            get_even_split_size_and_offset(p, i, total_degrees, num_degrees[i], offset_degrees[i]);
+		int A_start[current_p], A_end[current_p];
+		int B[current_p];
+		if(total_degrees > 0){
+			A_start[0] = A_end[0] = -1;
+			B[0] = -1;
+			if(prefix_sum_degrees_per_core[0] > 0){
+				A_start[0] = 0;
+				A_end[0] = get_slot_number(current_p, total_degrees, prefix_sum_degrees_per_core[0]);
+			}
+			_Cilk_for(int i = 1; i < current_p; ++i){
+				int prev_last = 0;
+				int current_last = 0;
+				A_start[i] = A_end[i] = B[i] = -1;
+				if(prefix_sum_degrees_per_core[i] > prefix_sum_degrees_per_core[i-1]){
+					prev_last = get_slot_number(current_p, total_degrees, prefix_sum_degrees_per_core[i-1]);
+					current_last = get_slot_number(current_p, total_degrees, prefix_sum_degrees_per_core[i]);
+					assert(prev_last <= current_p);
+					assert(current_last <= current_p);
+					assert(current_last >= prev_last);
+					if(prev_last < current_last){
+						A_start[i] = prev_last + 1;
+						A_end[i] = current_last;
+					}
+				}
+			}
+			_Cilk_for(int i = 0; i < current_p; ++i){
+				if(A_start[i] != -1){
+					for(int j = A_start[i]; j <= A_end[i]; ++j){
+						B[j] = i;
+					}
+				}
+			}
+		}
+#if DEBUG_ARRAY
+	cout<<"Testing Started"<<endl;
+	for(int i = 0; i < current_p; ++i){
+		cout<<i<<" "<<A_start[i]<<" "<<A_end[i]<<" "<<B[i]<<" "<<total_degrees<<endl;
+		assert(B[i] != -1);
+	}
+	cout<<"Testing Ended"<<endl;
+#endif
+
+        _Cilk_for (int i = 0; i < current_p; i++) {
+            get_even_split_size_and_offset(current_p, i, total_degrees, num_degrees[i], offset_degrees[i]);
 
             q[i].clear();
-            if (num_degrees[i] > 0) {
-                const int sublist = find_index_in_prefix_sum(offset_degrees[i]+1, prefix_sum_degrees_per_core);
+            if (num_degrees[i] > 0){
+				assert(B[i] != -1);
+                const int sublist = B[i];
                 const int degrees_in_earlier_lists = (sublist==0) ? 0 : prefix_sum_degrees_per_core[sublist-1];
                 const int vertex_in_sublist = find_index_in_prefix_sum(offset_degrees[i]+1 - degrees_in_earlier_lists, prefix_sum_degrees[sublist]);
                 const int degrees_in_earlier_vertexes = (vertex_in_sublist==0) ? 0 : prefix_sum_degrees[sublist][vertex_in_sublist-1];
@@ -310,7 +373,7 @@ int Graph::parallel_bfs(int s) {
             }
         }
         // Delete duplicate items from queues.
-        _Cilk_for (int i = 0; i < p; i++) {
+        _Cilk_for (int i = 0; i < current_p; i++) {
             //TODO: This can be balanced better by doing searches (including 'next queue' searches)
             int valid = 0;
             for (int index = 0; index < (int)q[i].size(); index++) {
@@ -328,14 +391,23 @@ int Graph::parallel_bfs(int s) {
         destructive_parallel_prefix_sum(queue_size);
         num_input_vertexes = queue_size.back();
         assert(num_input_vertexes <= n);
-        _Cilk_for (int i = 0; i < p; i++) {
+        _Cilk_for (int i = 0; i < current_p; i++) {
             const int offset = (i==0) ? 0 : queue_size[i-1];
             for (int j = 0; j < (int)q[i].size(); j++) {
                 input_vertexes[offset+j] = q[i][j];
             }
         }
+#if DEBUG_PRINT
+	cout<<"Remaining "<<num_input_vertexes<<endl;
+	for(int i = 0; i < current_p; ++i){
+		cout<<q[i].size()<<endl;
+		for(int j = 0; j < (int) q[i].size(); ++j){
+			cout<<q[i][j]<<" ";
+		}
+		cout<<endl;
+	}
+#endif
     }
-
     cilk::reducer_max<int> maxd(0);
     _Cilk_for (int u = 0; u < n; ++u) {
     	if(d[u] == INFINITY) continue;
@@ -390,6 +462,28 @@ void Problem::run(bool parallel) {
 #endif
     }
 }
+static void test_get_slot_number(void) {
+    const int maxp = 10;
+    int size[maxp];
+    int offset[maxp];
+    for (int p = 1; p < maxp; p++) {
+        for (int total = 0; total < 100; total++) {
+			if(p > total) continue;
+            for (int i = 0; i < p; i++) {
+                Graph::get_even_split_size_and_offset(p, i, total, size[i], offset[i]);
+            }
+			for(int i = 1; i <= total; ++i){
+				int slot = Graph::get_slot_number(p, total, i);
+				assert(offset[slot] <= i);
+				assert(slot < p);
+				if(slot < p-1){
+					assert(i - 1  < offset[slot+1] );
+				}
+			}
+        }
+    }
+}
+
 
 // Verifies this splits everything evenly and properly.
 static void test_get_even_split_size_and_offset(void) {
@@ -465,6 +559,7 @@ int cilk_main(int argc, char *argv[]) {
         fflush(stderr);
         test_get_even_split_size_and_offset();
         test_prefix_sum();
+		test_get_slot_number();
         exit(0);
     }
     if (!opt_c) {
