@@ -28,7 +28,7 @@
 //#include <cilk_mutex.h>
 
 #include "bfs.h"
-#define DEBUG_ARRAY 0
+#define DEBUG_ARRAY 1
 
 using namespace std;
 static int get_num_workers() {
@@ -259,7 +259,7 @@ __attribute__((__used__))
 static void printv(vector<uint64_t> v, char *name) {
     printf("V_%s=\n", name);
     for (size_t i = 0; i < v.size(); i++) {
-        printf("\t[%d] = [%lu]\n", (int)i, v[i]);
+        printf("\t[%d] = [%llu]\n", (int)i, v[i]);
     }
 }
 
@@ -307,14 +307,15 @@ int Graph::parallel_bfs(int s) {
     int * offset_degrees = (int *) malloc(sizeof(int) * p);
     int * num_vertexes = (int *) malloc(sizeof(int) * p);
     int * offset_vertexes = (int *) malloc(sizeof(int) * p);
-    vector<int> queue_size(p);
-    //int * queue_size = (int *) malloc(sizeof(int) * p);
+    //vector<int> queue_size(p);
+    int * queue_size = (int *) malloc(sizeof(int) * p);
     q.resize(p);
     while (num_input_vertexes > 0) {
 		int new_p = min(p, num_input_vertexes);
 		if(current_p != new_p){
 			current_p = min(p, num_input_vertexes);
 			prefix_sum_degrees_per_core.resize(current_p);
+			//queue_size.resize(current_p);
 		}
 		//current_p = p;
         _Cilk_for (int i = 0; i < current_p; i++) {
@@ -432,7 +433,8 @@ int Graph::parallel_bfs(int s) {
             //It can be moved up to prev _Cilk_for if no dedupping is done.
             queue_size[i] = q[i].size();
         }
-        destructive_parallel_prefix_sum(queue_size, current_p);
+        destructive_parallel_prefix_sum(queue_size, (size_t)current_p);
+        //destructive_parallel_prefix_sum(queue_size);
         num_input_vertexes = queue_size[current_p-1];
         assert(num_input_vertexes <= n);
         _Cilk_for (int i = 0; i < current_p; i++) {
@@ -453,10 +455,14 @@ int Graph::parallel_bfs(int s) {
 #endif
     }
     free(num_degrees);
+	std::cout<<"Num_degrees"<<endl;
     free(offset_degrees);
+	std::cout<<"Offset_degrees"<<endl;
     free(num_vertexes);
-    free(offset_degrees);
-    //free(queue_size);
+	std::cout<<"NUM_VERTICES"<<endl;
+    free(offset_vertexes);
+	std::cout<<"Offset_VERTICES"<<endl;
+    free(queue_size);
     cilk::reducer_max<int> maxd(0);
     _Cilk_for (int u = 0; u < n; ++u) {
     	if(d[u] == INFINITY) continue;

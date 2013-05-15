@@ -10,7 +10,7 @@
 #define CXX_CHECKS 0
 #define SINGLE_THREAD_PARANOID 0
 #define CILK_VERIFY 0
-#define DEBUG_PRINT 0
+#define DEBUG_PRINT 1
 #define PARANOID 0
 #define QUIT_EARLY 0
 
@@ -60,14 +60,17 @@ class Graph {
 
         template<class T>
         static void destructive_parallel_prefix_sum(std::vector<T> &v);
+		void destructive_parallel_prefix_sum(int * v, size_t limit); 
     private:
         int find_max_d(void) const;
 
         template<class T>
         static T destructive_parallel_prefix_sum_up(std::vector<T> &v, size_t start, size_t limit);
+		static int destructive_parallel_prefix_sum_up(int *, size_t, size_t); 
 
         template<class T>
         static void destructive_parallel_prefix_sum_down(std::vector<T> &v, size_t start, size_t limit, bool rightmost_excluded, T partial_sum);
+		static void destructive_parallel_prefix_sum_down(int *, size_t, size_t, bool, int); 
 
         static int find_index_in_prefix_sum(int value, std::vector<int> &v);
 };
