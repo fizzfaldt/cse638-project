@@ -180,6 +180,19 @@ void Graph::destructive_serial_prefix_sum(std::vector<T> &v) {
     }
 }
 
+int Graph::destructive_parallel_prefix_sum_up(int * v, size_t start, size_t limit) {
+    assert(limit > start);
+    const size_t size = limit - start;
+    if (size == 1) {
+        return v[start];
+    }
+    int x, y;
+    x = _Cilk_spawn destructive_parallel_prefix_sum_up(v, start, (start+limit)/2);
+    y = destructive_parallel_prefix_sum_up(v, (start+limit)/2, limit);
+    _Cilk_sync;
+    return (v[limit-1] = x+y);
+}
+
 template<class T>
 T Graph::destructive_parallel_prefix_sum_up(std::vector<T> &v, size_t start, size_t limit) {
     assert(limit > start);
@@ -193,6 +206,30 @@ T Graph::destructive_parallel_prefix_sum_up(std::vector<T> &v, size_t start, siz
     _Cilk_sync;
     return (v[limit-1] = x+y);
 }
+
+void Graph::destructive_parallel_prefix_sum_down(int * v, size_t start, size_t limit, bool rightmost_excluded, int partial_sum) {
+    assert(limit > start);
+    const size_t size = limit - start;
+    if (size == 1) {
+        v[start] += partial_sum;
+        return;
+    }
+    int sum_left = v[(start+limit)/2 - 1];
+    size_t mid = (start+limit)/2;
+    // Do entire left side.
+    _Cilk_spawn destructive_parallel_prefix_sum_down(v, start, mid, false, partial_sum);
+    // Rightmost element just takes partial_sum and is then excluded.
+    if (!rightmost_excluded) {
+        v[limit-1] += partial_sum;
+    }
+    assert(limit > mid);
+    // Do right half (excluding last element)
+    if (limit - mid > 1) {
+        destructive_parallel_prefix_sum_down(v, mid, limit, true, partial_sum + sum_left);
+    }
+    _Cilk_sync;
+}
+
 
 template<class T>
 void Graph::destructive_parallel_prefix_sum_down(std::vector<T> &v, size_t start, size_t limit, bool rightmost_excluded, T partial_sum) {
@@ -222,7 +259,14 @@ __attribute__((__used__))
 static void printv(vector<uint64_t> v, char *name) {
     printf("V_%s=\n", name);
     for (size_t i = 0; i < v.size(); i++) {
-        printf("\t[%d] = [%lld]\n", (int)i, v[i]);
+        printf("\t[%d] = [%lu]\n", (int)i, v[i]);
+    }
+}
+
+void Graph::destructive_parallel_prefix_sum(int * v, size_t limit) {
+    if (limit > 0) {
+        destructive_parallel_prefix_sum_up(v, 0, limit);
+        destructive_parallel_prefix_sum_down(v, 0, limit, false, 0);
     }
 }
 
@@ -259,18 +303,18 @@ int Graph::parallel_bfs(int s) {
     vector<int> prefix_sum_degrees_per_core;
     prefix_sum_degrees_per_core.resize(p);
 
-    vector<int> num_degrees(p);
-    vector<int> offset_degrees(p);
-    vector<int> num_vertexes(p);
-    vector<int> offset_vertexes(p);
+    int * num_degrees = (int *) malloc(sizeof(int) * p);
+    int * offset_degrees = (int *) malloc(sizeof(int) * p);
+    int * num_vertexes = (int *) malloc(sizeof(int) * p);
+    int * offset_vertexes = (int *) malloc(sizeof(int) * p);
     vector<int> queue_size(p);
+    //int * queue_size = (int *) malloc(sizeof(int) * p);
     q.resize(p);
     while (num_input_vertexes > 0) {
 		int new_p = min(p, num_input_vertexes);
 		if(current_p != new_p){
 			current_p = min(p, num_input_vertexes);
 			prefix_sum_degrees_per_core.resize(current_p);
-			queue_size.resize(current_p);
 		}
 		//current_p = p;
         _Cilk_for (int i = 0; i < current_p; i++) {
@@ -388,8 +432,8 @@ int Graph::parallel_bfs(int s) {
             //It can be moved up to prev _Cilk_for if no dedupping is done.
             queue_size[i] = q[i].size();
         }
-        destructive_parallel_prefix_sum(queue_size);
-        num_input_vertexes = queue_size.back();
+        destructive_parallel_prefix_sum(queue_size, current_p);
+        num_input_vertexes = queue_size[current_p-1];
         assert(num_input_vertexes <= n);
         _Cilk_for (int i = 0; i < current_p; i++) {
             const int offset = (i==0) ? 0 : queue_size[i-1];
@@ -408,6 +452,11 @@ int Graph::parallel_bfs(int s) {
 	}
 #endif
     }
+    free(num_degrees);
+    free(offset_degrees);
+    free(num_vertexes);
+    free(offset_degrees);
+    //free(queue_size);
     cilk::reducer_max<int> maxd(0);
     _Cilk_for (int u = 0; u < n; ++u) {
     	if(d[u] == INFINITY) continue;
@@ -576,6 +625,7 @@ int cilk_main(int argc, char *argv[]) {
     double start_d = start_t.tv_sec + start_t.tv_nsec / 1e9;
     double end_d = end_t.tv_sec + end_t.tv_nsec / 1e9;
 
+    fprintf(stderr, "Time taken: %s\n", argv[1]);
     fprintf(stderr, "Time taken: %f\n", end_d - start_d);
 //    p.init(filename);
     return 0;
