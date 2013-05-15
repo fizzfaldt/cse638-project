@@ -53,6 +53,8 @@ class Graph {
 
         static void get_even_split_size_and_offset(int p, int i, int total, int &size, int &offset);
 
+		static int get_slot_number(int , int , int );
+
         template<class T>
         static void destructive_serial_prefix_sum(std::vector<T> &v);
 
